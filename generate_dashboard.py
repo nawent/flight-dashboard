@@ -58,15 +58,14 @@ def run_dashboard():
     explore_trips = []
     target_trips = []
     
-    # 1A. General Explore
+    # 1A. General Explore Sweeps
     for origin in ORIGIN_CODES:
         for duration_type in ["1", "2"]:
             params = {
                 "engine": "google_travel_explore",
                 "departure_id": origin,
                 "travel_duration": duration_type,
-                "currency": "USD",
-                "api_key": API_KEY
+                "currency": "USD"
             }
             try:
                 results = client.search(params)
@@ -94,9 +93,9 @@ def run_dashboard():
                                 "holidays": hols, "is_international": is_intl
                             })
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error scanning explore for {origin}: {e}")
 
-    # 1B. Intl Regional Sweeps
+    # 1B. International Regional Sweeps
     for origin in ORIGIN_CODES:
         for region in INTL_REGIONS:
             for duration_type in ["1", "2"]:
@@ -105,8 +104,7 @@ def run_dashboard():
                     "departure_id": origin,
                     "arrival_area_id": region["area_id"],
                     "travel_duration": duration_type,
-                    "currency": "USD",
-                    "api_key": API_KEY
+                    "currency": "USD"
                 }
                 try:
                     results = client.search(params)
@@ -133,7 +131,7 @@ def run_dashboard():
                                     "holidays": hols, "is_international": True
                                 })
                 except Exception as e:
-                    print(f"Error: {e}")
+                    print(f"Error sweeping {region['name']} for {origin}: {e}")
 
     # 2. Target Wishlist Routes
     for route in TARGET_ROUTES:
@@ -152,7 +150,7 @@ def run_dashboard():
                 "engine": "google_flights", "departure_id": route["origin"],
                 "arrival_id": route["arrival_id"], "type": "1",
                 "outbound_date": out_str, "return_date": ret_str,
-                "currency": "USD", "api_key": API_KEY
+                "currency": "USD"
             }
             try:
                 res = client.search(f_params)
@@ -172,9 +170,9 @@ def run_dashboard():
                             "holidays": hols, "is_international": route.get("is_international", False)
                         })
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error checking target route {route['destination']}: {e}")
 
-    # Categorize
+    # Categorize & Sort
     target_trips.sort(key=lambda x: x["price"])
     dom_short = sorted([t for t in explore_trips if not t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     dom_long  = sorted([t for t in explore_trips if not t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
