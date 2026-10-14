@@ -1,21 +1,19 @@
 import os
+import csv
+import urllib.request
 import serpapi
 from datetime import datetime, timedelta
 
+# ==============================================================================
+# 🎛️ CONFIGURATION HUB (Managed via Google Sheets!)
+# ==============================================================================
 API_KEY = os.environ.get("SERPAPI_KEY")
+
+# 🔗 PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINKS HERE:
+WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
+HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
+
 ORIGIN_CODES = ["BOS", "PVD"]
-
-TARGET_ROUTES = [
-    {"origin": "BOS", "destination": "Boise (BOI)", "arrival_id": "BOI", "is_international": False}
-]
-
-USER_HOLIDAYS = [
-    {"name": "Veterans Day", "date": "2026-11-11"},
-    {"name": "Thanksgiving Break", "start": "2026-11-25", "end": "2026-11-27"},
-    {"name": "Christmas Break", "start": "2026-12-24", "end": "2026-12-25"},
-    {"name": "New Year's Day", "date": "2027-01-01"},
-    {"name": "Presidents' Day", "date": "2027-02-15"},
-]
 
 INTL_REGIONS = [
     {"name": "Europe", "area_id": "/m/02j9z"},
@@ -31,13 +29,52 @@ INTERNATIONAL_KEYWORDS = [
     "Bahamas", "Jamaica", "Aruba", "Puerto Vallarta", "Cabo", "Toronto", "Montreal", "Vancouver",
     "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon"
 ]
+# ==============================================================================
 
-def trip_includes_holiday(trip_start_str, trip_end_str):
+def load_config_from_sheets():
+    target_routes = []
+    user_holidays = []
+    
+    # 1. Load Wishlist from Google Sheets
+    try:
+        response = urllib.request.urlopen(WISHLIST_CSV_URL)
+        lines = [line.decode('utf-8') for line in response.readlines()]
+        reader = csv.DictReader(lines)
+        for row in reader:
+            target_routes.append({
+                "origin": row["origin"].strip(),
+                "destination": row["destination"].strip(),
+                "arrival_id": row["arrival_id"].strip(),
+                "is_international": row["is_international"].strip().upper() == "TRUE"
+            })
+    except Exception as e:
+        print(f"⚠️ Error loading Wishlist sheet: {e}")
+
+    # 2. Load Holidays from Google Sheets
+    try:
+        response = urllib.request.urlopen(HOLIDAYS_CSV_URL)
+        lines = [line.decode('utf-8') for line in response.readlines()]
+        reader = csv.DictReader(lines)
+        for row in reader:
+            h_entry = {"name": row["name"].strip()}
+            if row.get("date") and row["date"].strip():
+                h_entry["date"] = row["date"].strip()
+            if row.get("start") and row["start"].strip():
+                h_entry["start"] = row["start"].strip()
+            if row.get("end") and row["end"].strip():
+                h_entry["end"] = row["end"].strip()
+            user_holidays.append(h_entry)
+    except Exception as e:
+        print(f"⚠️ Error loading Holidays sheet: {e}")
+        
+    return target_routes, user_holidays
+
+def trip_includes_holiday(trip_start_str, trip_end_str, user_holidays):
     trip_start = datetime.strptime(trip_start_str, "%Y-%m-%d")
     trip_end = datetime.strptime(trip_end_str, "%Y-%m-%d")
     matched_holidays = []
     
-    for h in USER_HOLIDAYS:
+    for h in user_holidays:
         if "date" in h:
             h_date = datetime.strptime(h["date"], "%Y-%m-%d")
             if trip_start <= h_date <= trip_end:
@@ -54,6 +91,7 @@ def check_if_international(destination_name):
     return any(kw.lower() in destination_name.lower() for kw in INTERNATIONAL_KEYWORDS)
 
 def run_dashboard():
+    TARGET_ROUTES, USER_HOLIDAYS = load_config_from_sheets()
     client = serpapi.Client(api_key=API_KEY)
     explore_trips = []
     target_trips = []
@@ -80,7 +118,7 @@ def run_dashboard():
                     end_date = datetime.strptime(end_str, "%Y-%m-%d")
                     duration = (end_date - start_date).days
                     weekend_cnt = sum(1 for i in range(duration + 1) if (start_date + timedelta(days=i)).weekday() >= 4)
-                    hols = trip_includes_holiday(start_str, end_str)
+                    hols = trip_includes_holiday(start_str, end_str, USER_HOLIDAYS)
                     is_intl = check_if_international(name)
                     trip_sig = f"{origin}-{name}-{start_str}-{end_str}"
 
@@ -119,7 +157,7 @@ def run_dashboard():
                         end_date = datetime.strptime(end_str, "%Y-%m-%d")
                         duration = (end_date - start_date).days
                         weekend_cnt = sum(1 for i in range(duration + 1) if (start_date + timedelta(days=i)).weekday() >= 4)
-                        hols = trip_includes_holiday(start_str, end_str)
+                        hols = trip_includes_holiday(start_str, end_str, USER_HOLIDAYS)
                         trip_sig = f"{origin}-{name}-{start_str}-{end_str}"
 
                         if 3 <= duration <= 7 and (weekend_cnt >= 1 or len(hols) > 0):
@@ -160,7 +198,7 @@ def run_dashboard():
                     price = cheapest.get("price")
                     duration = (ret_date - out_date).days
                     weekend_cnt = sum(1 for i in range(duration + 1) if (out_date + timedelta(days=i)).weekday() >= 4)
-                    hols = trip_includes_holiday(out_str, ret_str)
+                    hols = trip_includes_holiday(out_str, ret_str, USER_HOLIDAYS)
                     t_sig = f"{route['origin']}-{route['destination']}-{out_str}-{ret_str}"
                     if not any(t["signature"] == t_sig for t in target_trips):
                         target_trips.append({
