@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 # ==============================================================================
 API_KEY = os.environ.get("SERPAPI_KEY")
 
-# 🔗 PASTE YOUR PUBLISHED GOOGLE SHEET CSV LINKS HERE:
 WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
 HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
 
@@ -27,15 +26,52 @@ INTERNATIONAL_KEYWORDS = [
     "Canada", "Mexico", "Europe", "UK", "France", "Italy", "Spain", "Germany", 
     "London", "Paris", "Rome", "Cancun", "Dublin", "Reykjavik", "Tokyo", "Costa Rica",
     "Bahamas", "Jamaica", "Aruba", "Puerto Vallarta", "Cabo", "Toronto", "Montreal", "Vancouver",
-    "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon"
+    "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon", "Hamilton"
 ]
+
+# Destination Location Lookup Table for Detailed City/State/Country & Airport Codes
+LOCATION_LOOKUP = {
+    "Hamilton": "Hamilton, Ontario, Canada (YHM/YYZ)",
+    "Montreal": "Montréal, Quebec, Canada (YUL)",
+    "Toronto": "Toronto, Ontario, Canada (YYZ)",
+    "Vancouver": "Vancouver, British Columbia, Canada (YVR)",
+    "Waterloo": "Kitchener-Waterloo, Ontario, Canada (YKF)",
+    "Calgary": "Calgary, Alberta, Canada (YYC)",
+    "Halifax": "Halifax, Nova Scotia, Canada (YHZ)",
+    "Windsor": "Windsor, Ontario, Canada (YQG)",
+    "Comox": "Comox Valley, British Columbia, Canada (YQQ)",
+    "Peterborough": "Peterborough, Ontario, Canada (YPQ/YYZ)",
+    "Mississauga": "Mississauga, Ontario, Canada (YYZ)",
+    "Niagara-on-the-Lake": "Niagara-on-the-Lake, Ontario, Canada (BUF/YYZ)",
+    "Algonquin Provincial Park": "Algonquin Park, Ontario, Canada (YYZ)",
+    "Whistler": "Whistler, British Columbia, Canada (YVR)",
+    "Squamish": "Squamish, British Columbia, Canada (YVR)",
+    "Asheville": "Asheville, North Carolina, USA (AVL)",
+    "Shenandoah National Park": "Shenandoah Valley, Virginia, USA (SHD/IAD)",
+    "Des Moines": "Des Moines, Iowa, USA (DSM)",
+    "Walt Disney World® Resort": "Orlando, Florida, USA (MCO)",
+    "Miami Beach": "Miami Beach, Florida, USA (MIA)",
+    "San José del Cabo": "Los Cabos, Baja California Sur, Mexico (SJD)",
+    "Florence": "Florence, Tuscany, Italy (FLR)",
+    "Dolomites": "Dolomites Region, Northern Italy (VCE/TSF)",
+    "Madrid": "Madrid, Spain (MAD)",
+    "Reykjavik": "Reykjavík, Iceland (KEF)",
+    "Helsinki": "Helsinki, Finland (HEL)",
+    "Dublin": "Dublin, Ireland (DUB)",
+    "Boise (BOI)": "Boise, Idaho, USA (BOI)"
+}
 # ==============================================================================
+
+def get_enhanced_location(destination_name):
+    for key, detailed_name in LOCATION_LOOKUP.items():
+        if key.lower() in destination_name.lower():
+            return detailed_name
+    return destination_name
 
 def load_config_from_sheets():
     target_routes = []
     user_holidays = []
     
-    # 1. Load Wishlist from Google Sheets
     try:
         response = urllib.request.urlopen(WISHLIST_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -50,7 +86,6 @@ def load_config_from_sheets():
     except Exception as e:
         print(f"⚠️ Error loading Wishlist sheet: {e}")
 
-    # 2. Load Holidays from Google Sheets
     try:
         response = urllib.request.urlopen(HOLIDAYS_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -90,6 +125,23 @@ def trip_includes_holiday(trip_start_str, trip_end_str, user_holidays):
 def check_if_international(destination_name):
     return any(kw.lower() in destination_name.lower() for kw in INTERNATIONAL_KEYWORDS)
 
+def evaluate_price_status(price, category):
+    # Historical category median benchmarks for quick context evaluation
+    benchmarks = {
+        "Dom Short": 160,
+        "Dom Long": 180,
+        "Intl Short": 380,
+        "Intl Long": 450
+    }
+    threshold = benchmarks.get(category, 250)
+    
+    if price < threshold * 0.85:
+        return "🟢 Below Avg", "price-low"
+    elif price <= threshold * 1.15:
+        return "🟡 Typical Price", "price-typical"
+    else:
+        return "🔴 Above Avg", "price-high"
+
 def run_dashboard():
     TARGET_ROUTES, USER_HOLIDAYS = load_config_from_sheets()
     client = serpapi.Client(api_key=API_KEY)
@@ -126,9 +178,11 @@ def run_dashboard():
                         if not any(t["signature"] == trip_sig for t in explore_trips):
                             explore_trips.append({
                                 "signature": trip_sig, "origin": origin, "destination": name,
+                                "detailed_dest": get_enhanced_location(name),
                                 "price": price, "start": start_str, "end": end_str,
                                 "duration": duration, "weekend_count": weekend_cnt,
-                                "holidays": hols, "is_international": is_intl
+                                "holidays": hols, "is_international": is_intl,
+                                "price_insights": None
                             })
             except Exception as e:
                 print(f"Error scanning explore for {origin}: {e}")
@@ -164,9 +218,11 @@ def run_dashboard():
                             if not any(t["signature"] == trip_sig for t in explore_trips):
                                 explore_trips.append({
                                     "signature": trip_sig, "origin": origin, "destination": name,
+                                    "detailed_dest": get_enhanced_location(name),
                                     "price": price, "start": start_str, "end": end_str,
                                     "duration": duration, "weekend_count": weekend_cnt,
-                                    "holidays": hols, "is_international": True
+                                    "holidays": hols, "is_international": True,
+                                    "price_insights": None
                                 })
                 except Exception as e:
                     print(f"Error sweeping {region['name']} for {origin}: {e}")
@@ -193,6 +249,8 @@ def run_dashboard():
             try:
                 res = client.search(f_params)
                 options = res.get("best_flights", []) + res.get("other_flights", [])
+                p_insights = res.get("price_insights", {})
+                
                 if options:
                     cheapest = min(options, key=lambda x: x.get("price", float('inf')))
                     price = cheapest.get("price")
@@ -203,9 +261,11 @@ def run_dashboard():
                     if not any(t["signature"] == t_sig for t in target_trips):
                         target_trips.append({
                             "signature": t_sig, "origin": route["origin"], "destination": route["destination"],
+                            "detailed_dest": get_enhanced_location(route["destination"]),
                             "price": price, "start": out_str, "end": ret_str,
                             "duration": duration, "weekend_count": weekend_cnt,
-                            "holidays": hols, "is_international": route.get("is_international", False)
+                            "holidays": hols, "is_international": route.get("is_international", False),
+                            "price_insights": p_insights
                         })
             except Exception as e:
                 print(f"Error checking target route {route['destination']}: {e}")
@@ -221,21 +281,41 @@ def run_dashboard():
     os.makedirs("public", exist_ok=True)
     now_str = datetime.now().strftime("%B %d, %Y at %I:%M %p EST")
 
-    def render_cards(trips, limit=15):
+    def render_cards(trips, category_label, limit=15):
         if not trips:
             return "<p class='no-data'>No active deals found matching this category right now.</p>"
         html = ""
         for t in trips[:limit]:
             hol_badge = f"<span class='badge hol'>🇺🇸 {', '.join(t['holidays'])}</span>" if t['holidays'] else ""
+            
+            # Determine Price Insight Badge
+            p_insights = t.get("price_insights")
+            if p_insights and p_insights.get("price_level"):
+                level = p_insights.get("price_level", "").lower()
+                low_r = p_insights.get("typical_price_range", [None, None])[0]
+                high_r = p_insights.get("typical_price_range", [None, None])[1]
+                range_str = f" (Typical: ${low_r}–${high_r})" if low_r and high_r else ""
+                
+                if level == "low":
+                    price_badge = f"<span class='badge price-low'>🟢 Below Avg{range_str}</span>"
+                elif level == "high":
+                    price_badge = f"<span class='badge price-high'>🔴 Above Avg{range_str}</span>"
+                else:
+                    price_badge = f"<span class='badge price-typical'>🟡 Typical Price{range_str}</span>"
+            else:
+                label_text, badge_class = evaluate_price_status(t["price"], category_label)
+                price_badge = f"<span class='badge {badge_class}'>{label_text}</span>"
+
             html += f"""
             <div class='card'>
                 <div class='card-header'>
-                    <span class='route'>{t['origin']} ➡️ {t['destination']}</span>
+                    <span class='route'>{t['origin']} ➡️ {t['detailed_dest']}</span>
                     <span class='price'>${t['price']}</span>
                 </div>
                 <div class='card-details'>
                     <span>📅 {t['start']} to {t['end']} ({t['duration']} days)</span>
                     <span>🗓️ {t['weekend_count']} Weekend Days</span>
+                    {price_badge}
                     {hol_badge}
                 </div>
             </div>
@@ -258,11 +338,14 @@ def run_dashboard():
             .section {{ background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
             h2 {{ margin-top: 0; font-size: 20px; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; }}
             .card {{ border: 1px solid #edf2f7; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #fafbfc; }}
-            .card-header {{ display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; }}
-            .price {{ color: #2b6cb0; font-size: 18px; }}
-            .card-details {{ margin-top: 8px; font-size: 14px; color: #555; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }}
-            .badge {{ background: #e2e8f0; border-radius: 4px; padding: 2px 6px; font-size: 12px; }}
-            .badge.hol {{ background: #feebc8; color: #744210; font-weight: bold; }}
+            .card-header {{ display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; flex-wrap: wrap; gap: 8px; }}
+            .price {{ color: #2b6cb0; font-size: 20px; }}
+            .card-details {{ margin-top: 8px; font-size: 14px; color: #555; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
+            .badge {{ border-radius: 4px; padding: 3px 8px; font-size: 12px; font-weight: bold; }}
+            .badge.hol {{ background: #feebc8; color: #744210; }}
+            .badge.price-low {{ background: #c6f6d5; color: #22543d; }}
+            .badge.price-typical {{ background: #e2e8f0; color: #2d3748; }}
+            .badge.price-high {{ background: #fed7d7; color: #742a2a; }}
             .no-data {{ color: #888; font-style: italic; }}
         </style>
     </head>
@@ -275,27 +358,27 @@ def run_dashboard():
 
             <div class="section">
                 <h2>🎯 1. Target Wishlist Routes</h2>
-                {render_cards(target_trips)}
+                {render_cards(target_trips, "Target")}
             </div>
 
             <div class="section">
                 <h2>🇺🇸 2. Domestic Quick Getaways (3–5 Days)</h2>
-                {render_cards(dom_short)}
+                {render_cards(dom_short, "Dom Short")}
             </div>
 
             <div class="section">
                 <h2>🌴 3. Domestic Week-Long Trips (6–7 Days)</h2>
-                {render_cards(dom_long)}
+                {render_cards(dom_long, "Dom Long")}
             </div>
 
             <div class="section">
                 <h2>✈️ 4. International Quick Getaways (3–5 Days)</h2>
-                {render_cards(intl_short)}
+                {render_cards(intl_short, "Intl Short")}
             </div>
 
             <div class="section">
                 <h2>🌍 5. International Week-Long Trips (6–7 Days)</h2>
-                {render_cards(intl_long)}
+                {render_cards(intl_long, "Intl Long")}
             </div>
         </div>
     </body>
