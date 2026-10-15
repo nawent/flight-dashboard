@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 # ==============================================================================
 API_KEY = os.environ.get("SERPAPI_KEY")
 
-WISHLIST_CSV_URL = "PASTE_YOUR_WISHLIST_CSV_LINK_HERE"
-HOLIDAYS_CSV_URL = "PASTE_YOUR_HOLIDAYS_CSV_LINK_HERE"
+WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
+HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
 
 ORIGIN_CODES = ["BOS", "PVD"]
 
