@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 # ==============================================================================
 API_KEY = os.environ.get("SERPAPI_KEY")
 
-WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
-HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
+WISHLIST_CSV_URL = "PASTE_YOUR_WISHLIST_CSV_LINK_HERE"
+HOLIDAYS_CSV_URL = "PASTE_YOUR_HOLIDAYS_CSV_LINK_HERE"
 
 ORIGIN_CODES = ["BOS", "PVD"]
 
@@ -29,7 +29,6 @@ INTERNATIONAL_KEYWORDS = [
     "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon", "Hamilton"
 ]
 
-# Destination Location Lookup Table for Detailed City/State/Country & Airport Codes
 LOCATION_LOOKUP = {
     "Hamilton": "Hamilton, Ontario, Canada (YHM/YYZ)",
     "Montreal": "Montréal, Quebec, Canada (YUL)",
@@ -40,25 +39,10 @@ LOCATION_LOOKUP = {
     "Halifax": "Halifax, Nova Scotia, Canada (YHZ)",
     "Windsor": "Windsor, Ontario, Canada (YQG)",
     "Comox": "Comox Valley, British Columbia, Canada (YQQ)",
-    "Peterborough": "Peterborough, Ontario, Canada (YPQ/YYZ)",
-    "Mississauga": "Mississauga, Ontario, Canada (YYZ)",
-    "Niagara-on-the-Lake": "Niagara-on-the-Lake, Ontario, Canada (BUF/YYZ)",
-    "Algonquin Provincial Park": "Algonquin Park, Ontario, Canada (YYZ)",
-    "Whistler": "Whistler, British Columbia, Canada (YVR)",
-    "Squamish": "Squamish, British Columbia, Canada (YVR)",
     "Asheville": "Asheville, North Carolina, USA (AVL)",
-    "Shenandoah National Park": "Shenandoah Valley, Virginia, USA (SHD/IAD)",
-    "Des Moines": "Des Moines, Iowa, USA (DSM)",
-    "Walt Disney World® Resort": "Orlando, Florida, USA (MCO)",
-    "Miami Beach": "Miami Beach, Florida, USA (MIA)",
-    "San José del Cabo": "Los Cabos, Baja California Sur, Mexico (SJD)",
-    "Florence": "Florence, Tuscany, Italy (FLR)",
-    "Dolomites": "Dolomites Region, Northern Italy (VCE/TSF)",
-    "Madrid": "Madrid, Spain (MAD)",
-    "Reykjavik": "Reykjavík, Iceland (KEF)",
-    "Helsinki": "Helsinki, Finland (HEL)",
-    "Dublin": "Dublin, Ireland (DUB)",
-    "Boise (BOI)": "Boise, Idaho, USA (BOI)"
+    "Boise": "Boise, Idaho, USA (BOI)",
+    "London": "London, United Kingdom (LHR/LGW)",
+    "Paris": "Paris, France (CDG/ORY)"
 }
 # ==============================================================================
 
@@ -69,23 +53,24 @@ def get_enhanced_location(destination_name):
     return destination_name
 
 def load_config_from_sheets():
-    target_routes = []
+    target_destinations = []
     user_holidays = []
     
+    # 1. Load Wishlist Destinations
     try:
         response = urllib.request.urlopen(WISHLIST_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
         reader = csv.DictReader(lines)
         for row in reader:
-            target_routes.append({
-                "origin": row["origin"].strip(),
+            target_destinations.append({
                 "destination": row["destination"].strip(),
                 "arrival_id": row["arrival_id"].strip(),
-                "is_international": row["is_international"].strip().upper() == "TRUE"
+                "is_international": row.get("is_international", "FALSE").strip().upper() == "TRUE"
             })
     except Exception as e:
         print(f"⚠️ Error loading Wishlist sheet: {e}")
 
+    # 2. Load Holidays
     try:
         response = urllib.request.urlopen(HOLIDAYS_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -102,7 +87,7 @@ def load_config_from_sheets():
     except Exception as e:
         print(f"⚠️ Error loading Holidays sheet: {e}")
         
-    return target_routes, user_holidays
+    return target_destinations, user_holidays
 
 def trip_includes_holiday(trip_start_str, trip_end_str, user_holidays):
     trip_start = datetime.strptime(trip_start_str, "%Y-%m-%d")
@@ -126,12 +111,12 @@ def check_if_international(destination_name):
     return any(kw.lower() in destination_name.lower() for kw in INTERNATIONAL_KEYWORDS)
 
 def evaluate_price_status(price, category):
-    # Historical category median benchmarks for quick context evaluation
     benchmarks = {
         "Dom Short": 160,
         "Dom Long": 180,
         "Intl Short": 380,
-        "Intl Long": 450
+        "Intl Long": 450,
+        "Wishlist": 300
     }
     threshold = benchmarks.get(category, 250)
     
@@ -143,12 +128,12 @@ def evaluate_price_status(price, category):
         return "🔴 Above Avg", "price-high"
 
 def run_dashboard():
-    TARGET_ROUTES, USER_HOLIDAYS = load_config_from_sheets()
+    TARGET_DESTINATIONS, USER_HOLIDAYS = load_config_from_sheets()
     client = serpapi.Client(api_key=API_KEY)
     explore_trips = []
-    target_trips = []
+    wishlist_grouped_trips = {target["destination"]: [] for target in TARGET_DESTINATIONS}
     
-    # 1A. General Explore Sweeps
+    # 1A. General Explore Sweeps (BOS & PVD)
     for origin in ORIGIN_CODES:
         for duration_type in ["1", "2"]:
             params = {
@@ -187,7 +172,7 @@ def run_dashboard():
             except Exception as e:
                 print(f"Error scanning explore for {origin}: {e}")
 
-    # 1B. International Regional Sweeps
+    # 1B. International Regional Sweeps (BOS & PVD)
     for origin in ORIGIN_CODES:
         for region in INTL_REGIONS:
             for duration_type in ["1", "2"]:
@@ -227,8 +212,12 @@ def run_dashboard():
                 except Exception as e:
                     print(f"Error sweeping {region['name']} for {origin}: {e}")
 
-    # 2. Target Wishlist Routes
-    for route in TARGET_ROUTES:
+    # 2. Target Wishlist Routes (Sweeps BOTH BOS and PVD automatically!)
+    for target in TARGET_DESTINATIONS:
+        dest_key = target["destination"]
+        if dest_key not in wishlist_grouped_trips:
+            wishlist_grouped_trips[dest_key] = []
+
         today = datetime.now()
         sample_dates = [
             (today + timedelta(days=30), today + timedelta(days=34)),
@@ -237,41 +226,46 @@ def run_dashboard():
             (today + timedelta(days=120), today + timedelta(days=124)),
             (datetime(2026, 11, 12), datetime(2026, 11, 16))
         ]
-        for out_date, ret_date in sample_dates:
-            out_str = out_date.strftime("%Y-%m-%d")
-            ret_str = ret_date.strftime("%Y-%m-%d")
-            f_params = {
-                "engine": "google_flights", "departure_id": route["origin"],
-                "arrival_id": route["arrival_id"], "type": "1",
-                "outbound_date": out_str, "return_date": ret_str,
-                "currency": "USD"
-            }
-            try:
-                res = client.search(f_params)
-                options = res.get("best_flights", []) + res.get("other_flights", [])
-                p_insights = res.get("price_insights", {})
-                
-                if options:
-                    cheapest = min(options, key=lambda x: x.get("price", float('inf')))
-                    price = cheapest.get("price")
-                    duration = (ret_date - out_date).days
-                    weekend_cnt = sum(1 for i in range(duration + 1) if (out_date + timedelta(days=i)).weekday() >= 4)
-                    hols = trip_includes_holiday(out_str, ret_str, USER_HOLIDAYS)
-                    t_sig = f"{route['origin']}-{route['destination']}-{out_str}-{ret_str}"
-                    if not any(t["signature"] == t_sig for t in target_trips):
-                        target_trips.append({
-                            "signature": t_sig, "origin": route["origin"], "destination": route["destination"],
-                            "detailed_dest": get_enhanced_location(route["destination"]),
-                            "price": price, "start": out_str, "end": ret_str,
-                            "duration": duration, "weekend_count": weekend_cnt,
-                            "holidays": hols, "is_international": route.get("is_international", False),
-                            "price_insights": p_insights
-                        })
-            except Exception as e:
-                print(f"Error checking target route {route['destination']}: {e}")
 
-    # Categorize & Sort
-    target_trips.sort(key=lambda x: x["price"])
+        for origin in ORIGIN_CODES:
+            for out_date, ret_date in sample_dates:
+                out_str = out_date.strftime("%Y-%m-%d")
+                ret_str = ret_date.strftime("%Y-%m-%d")
+                f_params = {
+                    "engine": "google_flights", "departure_id": origin,
+                    "arrival_id": target["arrival_id"], "type": "1",
+                    "outbound_date": out_str, "return_date": ret_str,
+                    "currency": "USD"
+                }
+                try:
+                    res = client.search(f_params)
+                    options = res.get("best_flights", []) + res.get("other_flights", [])
+                    p_insights = res.get("price_insights", {})
+                    
+                    if options:
+                        cheapest = min(options, key=lambda x: x.get("price", float('inf')))
+                        price = cheapest.get("price")
+                        duration = (ret_date - out_date).days
+                        weekend_cnt = sum(1 for i in range(duration + 1) if (out_date + timedelta(days=i)).weekday() >= 4)
+                        hols = trip_includes_holiday(out_str, ret_str, USER_HOLIDAYS)
+                        t_sig = f"{origin}-{dest_key}-{out_str}-{ret_str}"
+                        
+                        if not any(t["signature"] == t_sig for t in wishlist_grouped_trips[dest_key]):
+                            wishlist_grouped_trips[dest_key].append({
+                                "signature": t_sig, "origin": origin, "destination": dest_key,
+                                "detailed_dest": get_enhanced_location(dest_key),
+                                "price": price, "start": out_str, "end": ret_str,
+                                "duration": duration, "weekend_count": weekend_cnt,
+                                "holidays": hols, "price_insights": p_insights
+                            })
+                except Exception as e:
+                    print(f"Error checking {origin} -> {dest_key}: {e}")
+
+    # Sort wishlist options for each destination by price across both airports
+    for dest in wishlist_grouped_trips:
+        wishlist_grouped_trips[dest].sort(key=lambda x: x["price"])
+
+    # Categorize & Sort General Explore Lists
     dom_short = sorted([t for t in explore_trips if not t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     dom_long  = sorted([t for t in explore_trips if not t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
     intl_short = sorted([t for t in explore_trips if t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
@@ -288,7 +282,6 @@ def run_dashboard():
         for t in trips[:limit]:
             hol_badge = f"<span class='badge hol'>🇺🇸 {', '.join(t['holidays'])}</span>" if t['holidays'] else ""
             
-            # Determine Price Insight Badge
             p_insights = t.get("price_insights")
             if p_insights and p_insights.get("price_level"):
                 level = p_insights.get("price_level", "").lower()
@@ -322,6 +315,21 @@ def run_dashboard():
             """
         return html
 
+    # Render Individual Wishlist Sections
+    wishlist_sections_html = ""
+    if not wishlist_grouped_trips:
+        wishlist_sections_html = "<p class='no-data'>No wishlist destinations added yet. Update your Google Sheet wishlist!</p>"
+    else:
+        for dest_name, trips in wishlist_grouped_trips.items():
+            enhanced_name = get_enhanced_location(dest_name)
+            cards_html = render_cards(trips, "Wishlist", limit=5)
+            wishlist_sections_html += f"""
+            <div class='section'>
+                <h2>🎯 Target Destination: {enhanced_name}</h2>
+                {cards_html}
+            </div>
+            """
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -336,7 +344,7 @@ def run_dashboard():
             h1 {{ margin: 0; color: #111; font-size: 28px; }}
             .last-updated {{ font-size: 14px; color: #666; margin-top: 5px; }}
             .section {{ background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
-            h2 {{ margin-top: 0; font-size: 20px; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; }}
+            h2 {{ margin-top: 0; font-size: 20px; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; color: #1a365d; }}
             .card {{ border: 1px solid #edf2f7; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #fafbfc; }}
             .card-header {{ display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; flex-wrap: wrap; gap: 8px; }}
             .price {{ color: #2b6cb0; font-size: 20px; }}
@@ -356,28 +364,26 @@ def run_dashboard():
                 <div class="last-updated">Updated Daily | Last Scan: {now_str}</div>
             </header>
 
-            <div class="section">
-                <h2>🎯 1. Target Wishlist Routes</h2>
-                {render_cards(target_trips, "Target")}
-            </div>
+            <!-- Dynamic Wishlist Cards per Destination -->
+            {wishlist_sections_html}
 
             <div class="section">
-                <h2>🇺🇸 2. Domestic Quick Getaways (3–5 Days)</h2>
+                <h2>🇺🇸 General: Domestic Quick Getaways (3–5 Days)</h2>
                 {render_cards(dom_short, "Dom Short")}
             </div>
 
             <div class="section">
-                <h2>🌴 3. Domestic Week-Long Trips (6–7 Days)</h2>
+                <h2>🌴 General: Domestic Week-Long Trips (6–7 Days)</h2>
                 {render_cards(dom_long, "Dom Long")}
             </div>
 
             <div class="section">
-                <h2>✈️ 4. International Quick Getaways (3–5 Days)</h2>
+                <h2>✈️ General: International Quick Getaways (3–5 Days)</h2>
                 {render_cards(intl_short, "Intl Short")}
             </div>
 
             <div class="section">
-                <h2>🌍 5. International Week-Long Trips (6–7 Days)</h2>
+                <h2>🌍 General: International Week-Long Trips (6–7 Days)</h2>
                 {render_cards(intl_long, "Intl Long")}
             </div>
         </div>
