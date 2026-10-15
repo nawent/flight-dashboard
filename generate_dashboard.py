@@ -1,5 +1,6 @@
 import os
 import csv
+import json
 import urllib.request
 import serpapi
 from datetime import datetime, timedelta
@@ -11,11 +12,9 @@ API_KEY = os.environ.get("SERPAPI_KEY")
 
 WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
 HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
-BLACKLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pubhtml?gid=212482962&single=true"  # Optional
+BLACKLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pubhtml?gid=212482962&single=true"
 
 ORIGIN_CODES = ["BOS", "PVD"]
-
-# Hardcoded Blacklist fallback (Add any cities/destinations you want to ignore)
 BLACKLIST_DESTINATIONS = ["Hamilton", "Waterloo"]
 
 INTL_REGIONS = [
@@ -33,9 +32,7 @@ INTERNATIONAL_KEYWORDS = [
     "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon"
 ]
 
-# Comprehensive City Location Lookup
 LOCATION_LOOKUP = {
-    # Domestic US
     "Pittsburgh": "Pittsburgh, Pennsylvania, USA (PIT)",
     "Miami": "Miami, Florida, USA (MIA)",
     "Des Moines": "Des Moines, Iowa, USA (DSM)",
@@ -55,8 +52,6 @@ LOCATION_LOOKUP = {
     "New Orleans": "New Orleans, Louisiana, USA (MSY)",
     "Chicago": "Chicago, Illinois, USA (ORD/MDW)",
     "Atlanta": "Atlanta, Georgia, USA (ATL)",
-    
-    # International & Canada
     "Dublin": "Dublin, Ireland (DUB)",
     "Reykjavik": "Reykjavík, Iceland (KEF)",
     "London": "London, United Kingdom (LHR/LGW)",
@@ -74,15 +69,11 @@ LOCATION_LOOKUP = {
     "Calgary": "Calgary, Alberta, Canada (YYC)",
     "Halifax": "Halifax, Nova Scotia, Canada (YHZ)"
 }
-# ==============================================================================
 
 def get_enhanced_location(destination_name, raw_country=""):
-    # Check exact match or partial match in mapping table
     for key, detailed_name in LOCATION_LOOKUP.items():
         if key.lower() in destination_name.lower():
             return detailed_name
-    
-    # Smart Fallback Parser if not in dictionary
     if raw_country:
         return f"{destination_name}, {raw_country}"
     elif check_if_international(destination_name):
@@ -95,7 +86,6 @@ def load_config_from_sheets():
     user_holidays = []
     blacklisted = list(BLACKLIST_DESTINATIONS)
     
-    # 1. Load Wishlist
     try:
         response = urllib.request.urlopen(WISHLIST_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -109,7 +99,6 @@ def load_config_from_sheets():
     except Exception as e:
         print(f"⚠️ Error loading Wishlist sheet: {e}")
 
-    # 2. Load Holidays
     try:
         response = urllib.request.urlopen(HOLIDAYS_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -126,7 +115,6 @@ def load_config_from_sheets():
     except Exception as e:
         print(f"⚠️ Error loading Holidays sheet: {e}")
 
-    # 3. Load Optional Blacklist Sheet
     if BLACKLIST_CSV_URL and "PASTE_" not in BLACKLIST_CSV_URL:
         try:
             response = urllib.request.urlopen(BLACKLIST_CSV_URL)
@@ -176,17 +164,18 @@ def evaluate_price_status(price, category):
     threshold = benchmarks.get(category, 250)
     
     if price < threshold * 0.85:
-        return "🟢 Below Avg", "price-low"
+        return "🟢 Below Avg", "price-low", "#059669"
     elif price <= threshold * 1.15:
-        return "🟡 Typical Price", "price-typical"
+        return "🟡 Typical Price", "price-typical", "#d97706"
     else:
-        return "🔴 Above Avg", "price-high"
+        return "🔴 Above Avg", "price-high", "#dc2626"
 
 def run_dashboard():
     TARGET_DESTINATIONS, USER_HOLIDAYS, BLACKLIST = load_config_from_sheets()
     client = serpapi.Client(api_key=API_KEY)
     explore_trips = []
     wishlist_grouped_trips = {target["destination"]: [] for target in TARGET_DESTINATIONS}
+    all_calendar_events = []
     
     # 1A. General Explore Sweeps
     for origin in ORIGIN_CODES:
@@ -335,6 +324,34 @@ def run_dashboard():
     intl_short = sorted([t for t in explore_trips if t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     intl_long  = sorted([t for t in explore_trips if t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
 
+    # Aggregate all trips into FullCalendar Event JSON
+    all_trips = dom_short + dom_long + intl_short + intl_long
+    for dest, trips in wishlist_grouped_trips.items():
+        all_trips.extend(trips)
+
+    for t in all_trips:
+        cat_label = "Wishlist" if t["destination"] in wishlist_grouped_trips else ("Intl" if t["is_international"] else "Dom")
+        label_text, badge_class, color_hex = evaluate_price_status(t["price"], cat_label)
+        
+        # Calendar end date is exclusive in FullCalendar, so add 1 day for multi-day visual spanning
+        end_date_dt = datetime.strptime(t["end"], "%Y-%m-%d") + timedelta(days=1)
+        
+        all_calendar_events.append({
+            "title": f"{t['origin']} → {t['destination']} (${t['price']})",
+            "start": t["start"],
+            "end": end_date_dt.strftime("%Y-%m-%d"),
+            "backgroundColor": color_hex,
+            "borderColor": color_hex,
+            "extendedProps": {
+                "full_dest": t["detailed_dest"],
+                "price": f"${t['price']}",
+                "status": label_text,
+                "duration": f"{t['duration']} days",
+                "origin": t["origin"],
+                "holidays": ", ".join(t["holidays"]) if t["holidays"] else "None"
+            }
+        })
+
     os.makedirs("public", exist_ok=True)
     now_str = datetime.now().strftime("%B %d, %Y at %I:%M %p EST")
 
@@ -359,7 +376,7 @@ def run_dashboard():
                 else:
                     price_badge = f"<span class='badge price-typical'>🟡 Typical Price{range_str}</span>"
             else:
-                label_text, badge_class = evaluate_price_status(t["price"], category_label)
+                label_text, badge_class, _ = evaluate_price_status(t["price"], category_label)
                 price_badge = f"<span class='badge {badge_class}'>{label_text}</span>"
 
             html += f"""
@@ -392,10 +409,10 @@ def run_dashboard():
             </div>
             """
 
-    # Build Coverage Footer Info
     regions_str = ", ".join([r["name"] for r in INTL_REGIONS])
     targets_str = ", ".join([t["destination"] for t in TARGET_DESTINATIONS]) if TARGET_DESTINATIONS else "None"
     blacklist_str = ", ".join(BLACKLIST) if BLACKLIST else "None"
+    calendar_events_json = json.dumps(all_calendar_events)
 
     html_content = f"""
     <!DOCTYPE html>
@@ -404,12 +421,31 @@ def run_dashboard():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Flight Intelligence Dashboard</title>
+        <!-- FullCalendar Bundle -->
+        <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }}
-            .container {{ max-width: 900px; margin: 0 auto; }}
-            header {{ text-align: center; margin-bottom: 25px; }}
+            .container {{ max-width: 1000px; margin: 0 auto; }}
+            header {{ text-align: center; margin-bottom: 20px; }}
             h1 {{ margin: 0; color: #f8fafc; font-size: 28px; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
             .last-updated {{ font-size: 14px; color: #94a3b8; margin-top: 5px; }}
+            
+            /* Tab Navigation */
+            .tabs {{ display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }}
+            .tab-btn {{ background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; transition: all 0.2s; }}
+            .tab-btn.active {{ background: #38bdf8; color: #0f172a; border-color: #38bdf8; }}
+            .tab-content {{ display: none; }}
+            .tab-content.active {{ display: block; }}
+
+            /* Calendar Styling */
+            #calendar {{ background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
+            .fc-theme-standard td, .fc-theme-standard th {{ border-color: #334155 !important; }}
+            .fc .fc-toolbar-title {{ color: #f8fafc; font-size: 20px; }}
+            .fc .fc-button-primary {{ background-color: #334155; border-color: #475569; color: #f8fafc; }}
+            .fc .fc-button-primary:hover {{ background-color: #38bdf8; border-color: #38bdf8; color: #0f172a; }}
+            .fc-daygrid-day-number {{ color: #cbd5e1; text-decoration: none !important; }}
+
+            /* Cards Styling */
             .section {{ background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #334155; }}
             h2 {{ margin-top: 0; font-size: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; color: #38bdf8; }}
             .card {{ border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #0f172a; }}
@@ -433,26 +469,39 @@ def run_dashboard():
                 <div class="last-updated">Updated Daily | Last Scan: {now_str}</div>
             </header>
 
-            {wishlist_sections_html}
-
-            <div class="section">
-                <h2>🇺🇸 General: Domestic Quick Getaways (3–5 Days)</h2>
-                {render_cards(dom_short, "Dom Short")}
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('listView')">📋 List View</button>
+                <button class="tab-btn" onclick="switchTab('calendarView')">📅 Calendar View</button>
             </div>
 
-            <div class="section">
-                <h2>🌴 General: Domestic Week-Long Trips (6–7 Days)</h2>
-                {render_cards(dom_long, "Dom Long")}
+            <!-- TAB 1: LIST VIEW -->
+            <div id="listView" class="tab-content active">
+                {wishlist_sections_html}
+
+                <div class="section">
+                    <h2>🇺🇸 General: Domestic Quick Getaways (3–5 Days)</h2>
+                    {render_cards(dom_short, "Dom Short")}
+                </div>
+
+                <div class="section">
+                    <h2>🌴 General: Domestic Week-Long Trips (6–7 Days)</h2>
+                    {render_cards(dom_long, "Dom Long")}
+                </div>
+
+                <div class="section">
+                    <h2>✈️ General: International Quick Getaways (3–5 Days)</h2>
+                    {render_cards(intl_short, "Intl Short")}
+                </div>
+
+                <div class="section">
+                    <h2>🌍 General: International Week-Long Trips (6–7 Days)</h2>
+                    {render_cards(intl_long, "Intl Long")}
+                </div>
             </div>
 
-            <div class="section">
-                <h2>✈️ General: International Quick Getaways (3–5 Days)</h2>
-                {render_cards(intl_short, "Intl Short")}
-            </div>
-
-            <div class="section">
-                <h2>🌍 General: International Week-Long Trips (6–7 Days)</h2>
-                {render_cards(intl_long, "Intl Long")}
+            <!-- TAB 2: CALENDAR VIEW -->
+            <div id="calendarView" class="tab-content">
+                <div id="calendar"></div>
             </div>
 
             <footer>
@@ -463,6 +512,45 @@ def run_dashboard():
                 <div>• <strong>Excluded / Blacklisted Destinations:</strong> {blacklist_str}</div>
             </footer>
         </div>
+
+        <script>
+            let calendarInstance = null;
+
+            function switchTab(tabId) {{
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+                
+                document.getElementById(tabId).classList.add('active');
+                event.currentTarget.classList.add('active');
+
+                if (tabId === 'calendarView' && !calendarInstance) {{
+                    initCalendar();
+                }}
+            }}
+
+            function initCalendar() {{
+                const calendarEl = document.getElementById('calendar');
+                calendarInstance = new FullCalendar.Calendar(calendarEl, {{
+                    initialView: 'dayGridMonth',
+                    headerToolbar: {{
+                        left: 'prev,next today',
+                        center: 'title',
+                        right: 'dayGridMonth,timeGridWeek'
+                    }},
+                    events: {calendar_events_json},
+                    eventClick: function(info) {{
+                        const props = info.event.extendedProps;
+                        alert(
+                            "✈️ " + props.origin + " → " + props.full_dest + "\\n" +
+                            "💰 Price: " + props.price + " (" + props.status + ")\\n" +
+                            "⏱️ Duration: " + props.duration + "\\n" +
+                            "🇺🇸 Holidays Covered: " + props.holidays
+                        );
+                    }}
+                }});
+                calendarInstance.render();
+            }}
+        </script>
     </body>
     </html>
     """
