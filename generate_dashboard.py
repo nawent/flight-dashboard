@@ -360,7 +360,7 @@ def run_dashboard():
     <body>
         <div class="container">
             <header>
-                <h1>✈️ Flight Intelligence Dashboard</h1>
+                <h1>✈️ Flight Dashboard</h1>
                 <div class="last-updated">Updated Daily | Last Scan: {now_str}</div>
             </header>
 
