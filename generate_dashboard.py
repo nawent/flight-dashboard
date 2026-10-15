@@ -302,7 +302,7 @@ def run_dashboard():
             html += f"""
             <div class='card'>
                 <div class='card-header'>
-                    <span class='route'>{t['origin']} ➡️ {t['detailed_dest']}</span>
+                    <span class='route'>{t['origin']} <span class='arrow'>➡️</span> {t['detailed_dest']}</span>
                     <span class='price'>${t['price']}</span>
                 </div>
                 <div class='card-details'>
@@ -337,30 +337,186 @@ def run_dashboard():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Flight Intelligence Dashboard</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f6f8; color: #333; margin: 0; padding: 20px; }}
-            .container {{ max-width: 900px; margin: 0 auto; }}
-            header {{ text-align: center; margin-bottom: 25px; }}
-            h1 {{ margin: 0; color: #111; font-size: 28px; }}
-            .last-updated {{ font-size: 14px; color: #666; margin-top: 5px; }}
-            .section {{ background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }}
-            h2 {{ margin-top: 0; font-size: 20px; border-bottom: 2px solid #eaeaea; padding-bottom: 10px; color: #1a365d; }}
-            .card {{ border: 1px solid #edf2f7; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #fafbfc; }}
-            .card-header {{ display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; flex-wrap: wrap; gap: 8px; }}
-            .price {{ color: #2b6cb0; font-size: 20px; }}
-            .card-details {{ margin-top: 8px; font-size: 14px; color: #555; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
-            .badge {{ border-radius: 4px; padding: 3px 8px; font-size: 12px; font-weight: bold; }}
-            .badge.hol {{ background: #feebc8; color: #744210; }}
-            .badge.price-low {{ background: #c6f6d5; color: #22543d; }}
-            .badge.price-typical {{ background: #e2e8f0; color: #2d3748; }}
-            .badge.price-high {{ background: #fed7d7; color: #742a2a; }}
-            .no-data {{ color: #888; font-style: italic; }}
+            :root {{
+                --bg-main: #0f172a;
+                --bg-card: #1e293b;
+                --bg-card-hover: #334155;
+                --border-color: #334155;
+                --text-main: #f8fafc;
+                --text-muted: #94a3b8;
+                --accent-blue: #38bdf8;
+                --glow-price: #38bdf8;
+            }}
+            
+            * {{
+                box-sizing: border-box;
+            }}
+
+            body {{
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                background-color: var(--bg-main);
+                color: var(--text-main);
+                margin: 0;
+                padding: 24px 16px;
+                line-height: 1.5;
+            }}
+
+            .container {{
+                max-width: 920px;
+                margin: 0 auto;
+            }}
+
+            header {{
+                text-align: center;
+                margin-bottom: 32px;
+                padding: 10px 0;
+            }}
+
+            h1 {{
+                margin: 0;
+                color: var(--text-main);
+                font-size: 32px;
+                font-weight: 800;
+                letter-spacing: -0.025em;
+                background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }}
+
+            .last-updated {{
+                font-size: 13px;
+                color: var(--text-muted);
+                margin-top: 6px;
+                font-weight: 500;
+            }}
+
+            .section {{
+                background: var(--bg-card);
+                border: 1px solid var(--border-color);
+                border-radius: 16px;
+                padding: 24px;
+                margin-bottom: 24px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+            }}
+
+            h2 {{
+                margin-top: 0;
+                font-size: 20px;
+                font-weight: 700;
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 14px;
+                color: #e2e8f0;
+                letter-spacing: -0.01em;
+            }}
+
+            .card {{
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 12px;
+                background: #0f172a;
+                transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+            }}
+
+            .card:hover {{
+                transform: translateY(-2px);
+                border-color: #475569;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            }}
+
+            .card-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-weight: 700;
+                font-size: 16px;
+                flex-wrap: wrap;
+                gap: 12px;
+            }}
+
+            .route {{
+                color: #f1f5f9;
+            }}
+
+            .arrow {{
+                color: var(--accent-blue);
+                font-size: 14px;
+            }}
+
+            .price {{
+                color: var(--accent-blue);
+                font-size: 22px;
+                font-weight: 800;
+                text-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+            }}
+
+            .card-details {{
+                margin-top: 12px;
+                font-size: 13.5px;
+                color: var(--text-muted);
+                display: flex;
+                gap: 12px;
+                flex-wrap: wrap;
+                align-items: center;
+            }}
+
+            .badge {{
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                font-weight: 700;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }}
+
+            .badge.hol {{
+                background: rgba(245, 158, 11, 0.15);
+                color: #fbbf24;
+                border: 1px solid rgba(245, 158, 11, 0.3);
+            }}
+
+            .badge.price-low {{
+                background: rgba(16, 185, 129, 0.15);
+                color: #34d399;
+                border: 1px solid rgba(16, 185, 129, 0.3);
+            }}
+
+            .badge.price-typical {{
+                background: rgba(148, 163, 184, 0.15);
+                color: #cbd5e1;
+                border: 1px solid rgba(148, 163, 184, 0.3);
+            }}
+
+            .badge.price-high {{
+                background: rgba(239, 68, 68, 0.15);
+                color: #f87171;
+                border: 1px solid rgba(239, 68, 68, 0.3);
+            }}
+
+            .no-data {{
+                color: var(--text-muted);
+                font-style: italic;
+                margin: 8px 0 0 0;
+            }}
+
+            @media (max-width: 600px) {{
+                body {{ padding: 16px 8px; }}
+                .section {{ padding: 16px; border-radius: 12px; }}
+                h1 {{ font-size: 24px; }}
+                .card-header {{ flex-direction: column; align-items: flex-start; gap: 4px; }}
+                .price {{ font-size: 20px; }}
+            }}
         </style>
     </head>
     <body>
         <div class="container">
             <header>
-                <h1>✈️ Flight Dashboard</h1>
+                <h1>✈️ Flight Intelligence Dashboard</h1>
                 <div class="last-updated">Updated Daily | Last Scan: {now_str}</div>
             </header>
 
