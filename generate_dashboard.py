@@ -175,7 +175,6 @@ def run_dashboard():
     client = serpapi.Client(api_key=API_KEY)
     explore_trips = []
     wishlist_grouped_trips = {target["destination"]: [] for target in TARGET_DESTINATIONS}
-    all_calendar_events = []
     
     # 1A. General Explore Sweeps
     for origin in ORIGIN_CODES:
@@ -324,16 +323,33 @@ def run_dashboard():
     intl_short = sorted([t for t in explore_trips if t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     intl_long  = sorted([t for t in explore_trips if t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
 
-    # Aggregate all trips into FullCalendar Event JSON
-    all_trips = dom_short + dom_long + intl_short + intl_long
+    # ==============================================================================
+    # 🎯 CALENDAR FILTER: Strict Top Curated Deals Only
+    # ==============================================================================
+    curated_calendar_trips = []
+    
+    # 1. Top 5 for each Wishlist Destination
     for dest, trips in wishlist_grouped_trips.items():
-        all_trips.extend(trips)
+        curated_calendar_trips.extend(trips[:5])
 
-    for t in all_trips:
+    # 2. Top 15 from each Category Leaderboard
+    curated_calendar_trips.extend(dom_short[:15])
+    curated_calendar_trips.extend(dom_long[:15])
+    curated_calendar_trips.extend(intl_short[:15])
+    curated_calendar_trips.extend(intl_long[:15])
+
+    # Deduplicate calendar events by signature
+    seen_sigs = set()
+    all_calendar_events = []
+
+    for t in curated_calendar_trips:
+        if t["signature"] in seen_sigs:
+            continue
+        seen_sigs.add(t["signature"])
+
         cat_label = "Wishlist" if t["destination"] in wishlist_grouped_trips else ("Intl" if t["is_international"] else "Dom")
         label_text, badge_class, color_hex = evaluate_price_status(t["price"], cat_label)
         
-        # Calendar end date is exclusive in FullCalendar, so add 1 day for multi-day visual spanning
         end_date_dt = datetime.strptime(t["end"], "%Y-%m-%d") + timedelta(days=1)
         
         all_calendar_events.append({
@@ -421,7 +437,6 @@ def run_dashboard():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Flight Intelligence Dashboard</title>
-        <!-- FullCalendar Bundle -->
         <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }}
@@ -430,14 +445,12 @@ def run_dashboard():
             h1 {{ margin: 0; color: #f8fafc; font-size: 28px; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
             .last-updated {{ font-size: 14px; color: #94a3b8; margin-top: 5px; }}
             
-            /* Tab Navigation */
             .tabs {{ display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }}
             .tab-btn {{ background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 15px; transition: all 0.2s; }}
             .tab-btn.active {{ background: #38bdf8; color: #0f172a; border-color: #38bdf8; }}
             .tab-content {{ display: none; }}
             .tab-content.active {{ display: block; }}
 
-            /* Calendar Styling */
             #calendar {{ background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
             .fc-theme-standard td, .fc-theme-standard th {{ border-color: #334155 !important; }}
             .fc .fc-toolbar-title {{ color: #f8fafc; font-size: 20px; }}
@@ -445,7 +458,6 @@ def run_dashboard():
             .fc .fc-button-primary:hover {{ background-color: #38bdf8; border-color: #38bdf8; color: #0f172a; }}
             .fc-daygrid-day-number {{ color: #cbd5e1; text-decoration: none !important; }}
 
-            /* Cards Styling */
             .section {{ background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #334155; }}
             h2 {{ margin-top: 0; font-size: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; color: #38bdf8; }}
             .card {{ border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #0f172a; }}
