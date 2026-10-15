@@ -5,14 +5,18 @@ import serpapi
 from datetime import datetime, timedelta
 
 # ==============================================================================
-# 🎛️ CONFIGURATION HUB (Managed via Google Sheets!)
+# 🎛️ CONFIGURATION HUB
 # ==============================================================================
 API_KEY = os.environ.get("SERPAPI_KEY")
 
 WISHLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=0&single=true&output=csv"
 HOLIDAYS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pub?gid=1128536141&single=true&output=csv"
+BLACKLIST_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQQSls-dmabSaeWWWTJd4TSu9KEylid0yvgwQZqvkaNcEC4cKl8hSfHW7Fj6pFGvOJ9jiBdHxeroe_f/pubhtml?gid=212482962&single=true"  # Optional
 
 ORIGIN_CODES = ["BOS", "PVD"]
+
+# Hardcoded Blacklist fallback (Add any cities/destinations you want to ignore)
+BLACKLIST_DESTINATIONS = ["Hamilton", "Waterloo"]
 
 INTL_REGIONS = [
     {"name": "Europe", "area_id": "/m/02j9z"},
@@ -26,37 +30,72 @@ INTERNATIONAL_KEYWORDS = [
     "Canada", "Mexico", "Europe", "UK", "France", "Italy", "Spain", "Germany", 
     "London", "Paris", "Rome", "Cancun", "Dublin", "Reykjavik", "Tokyo", "Costa Rica",
     "Bahamas", "Jamaica", "Aruba", "Puerto Vallarta", "Cabo", "Toronto", "Montreal", "Vancouver",
-    "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon", "Hamilton"
+    "Punta Cana", "Santo Domingo", "Bermuda", "Bogota", "Lima", "San Jose", "Lisbon"
 ]
 
+# Comprehensive City Location Lookup
 LOCATION_LOOKUP = {
-    "Hamilton": "Hamilton, Ontario, Canada (YHM/YYZ)",
+    # Domestic US
+    "Pittsburgh": "Pittsburgh, Pennsylvania, USA (PIT)",
+    "Miami": "Miami, Florida, USA (MIA)",
+    "Des Moines": "Des Moines, Iowa, USA (DSM)",
+    "Asheville": "Asheville, North Carolina, USA (AVL)",
+    "Boise": "Boise, Idaho, USA (BOI)",
+    "Orlando": "Orlando, Florida, USA (MCO)",
+    "Tampa": "Tampa, Florida, USA (TPA)",
+    "Fort Lauderdale": "Fort Lauderdale, Florida, USA (FLL)",
+    "Denver": "Denver, Colorado, USA (DEN)",
+    "Phoenix": "Phoenix, Arizona, USA (PHX)",
+    "Las Vegas": "Las Vegas, Nevada, USA (LAS)",
+    "Los Angeles": "Los Angeles, California, USA (LAX)",
+    "San Francisco": "San Francisco, California, USA (SFO)",
+    "Seattle": "Seattle, Washington, USA (SEA)",
+    "Austin": "Austin, Texas, USA (AUS)",
+    "Nashville": "Nashville, Tennessee, USA (BNA)",
+    "New Orleans": "New Orleans, Louisiana, USA (MSY)",
+    "Chicago": "Chicago, Illinois, USA (ORD/MDW)",
+    "Atlanta": "Atlanta, Georgia, USA (ATL)",
+    
+    # International & Canada
+    "Dublin": "Dublin, Ireland (DUB)",
+    "Reykjavik": "Reykjavík, Iceland (KEF)",
+    "London": "London, United Kingdom (LHR/LGW)",
+    "Paris": "Paris, France (CDG/ORY)",
+    "Rome": "Rome, Italy (FCO)",
+    "Barcelona": "Barcelona, Spain (BCN)",
+    "Madrid": "Madrid, Spain (MAD)",
+    "Amsterdam": "Amsterdam, Netherlands (AMS)",
+    "Lisbon": "Lisbon, Portugal (LIS)",
+    "Cancun": "Cancún, Mexico (CUN)",
+    "San José del Cabo": "Los Cabos, Mexico (SJD)",
     "Montreal": "Montréal, Quebec, Canada (YUL)",
     "Toronto": "Toronto, Ontario, Canada (YYZ)",
     "Vancouver": "Vancouver, British Columbia, Canada (YVR)",
-    "Waterloo": "Kitchener-Waterloo, Ontario, Canada (YKF)",
     "Calgary": "Calgary, Alberta, Canada (YYC)",
-    "Halifax": "Halifax, Nova Scotia, Canada (YHZ)",
-    "Windsor": "Windsor, Ontario, Canada (YQG)",
-    "Comox": "Comox Valley, British Columbia, Canada (YQQ)",
-    "Asheville": "Asheville, North Carolina, USA (AVL)",
-    "Boise": "Boise, Idaho, USA (BOI)",
-    "London": "London, United Kingdom (LHR/LGW)",
-    "Paris": "Paris, France (CDG/ORY)"
+    "Halifax": "Halifax, Nova Scotia, Canada (YHZ)"
 }
 # ==============================================================================
 
-def get_enhanced_location(destination_name):
+def get_enhanced_location(destination_name, raw_country=""):
+    # Check exact match or partial match in mapping table
     for key, detailed_name in LOCATION_LOOKUP.items():
         if key.lower() in destination_name.lower():
             return detailed_name
-    return destination_name
+    
+    # Smart Fallback Parser if not in dictionary
+    if raw_country:
+        return f"{destination_name}, {raw_country}"
+    elif check_if_international(destination_name):
+        return f"{destination_name} (International)"
+    else:
+        return f"{destination_name}, USA"
 
 def load_config_from_sheets():
     target_destinations = []
     user_holidays = []
+    blacklisted = list(BLACKLIST_DESTINATIONS)
     
-    # 1. Load Wishlist Destinations
+    # 1. Load Wishlist
     try:
         response = urllib.request.urlopen(WISHLIST_CSV_URL)
         lines = [line.decode('utf-8') for line in response.readlines()]
@@ -86,8 +125,24 @@ def load_config_from_sheets():
             user_holidays.append(h_entry)
     except Exception as e:
         print(f"⚠️ Error loading Holidays sheet: {e}")
+
+    # 3. Load Optional Blacklist Sheet
+    if BLACKLIST_CSV_URL and "PASTE_" not in BLACKLIST_CSV_URL:
+        try:
+            response = urllib.request.urlopen(BLACKLIST_CSV_URL)
+            lines = [line.decode('utf-8') for line in response.readlines()]
+            reader = csv.DictReader(lines)
+            for row in reader:
+                dest = row.get("destination", "").strip()
+                if dest and dest not in blacklisted:
+                    blacklisted.append(dest)
+        except Exception as e:
+            print(f"⚠️ Error loading Blacklist sheet: {e}")
         
-    return target_destinations, user_holidays
+    return target_destinations, user_holidays, blacklisted
+
+def is_blacklisted(destination_name, blacklist):
+    return any(b.lower() in destination_name.lower() for b in blacklist)
 
 def trip_includes_holiday(trip_start_str, trip_end_str, user_holidays):
     trip_start = datetime.strptime(trip_start_str, "%Y-%m-%d")
@@ -128,12 +183,12 @@ def evaluate_price_status(price, category):
         return "🔴 Above Avg", "price-high"
 
 def run_dashboard():
-    TARGET_DESTINATIONS, USER_HOLIDAYS = load_config_from_sheets()
+    TARGET_DESTINATIONS, USER_HOLIDAYS, BLACKLIST = load_config_from_sheets()
     client = serpapi.Client(api_key=API_KEY)
     explore_trips = []
     wishlist_grouped_trips = {target["destination"]: [] for target in TARGET_DESTINATIONS}
     
-    # 1A. General Explore Sweeps (BOS & PVD)
+    # 1A. General Explore Sweeps
     for origin in ORIGIN_CODES:
         for duration_type in ["1", "2"]:
             params = {
@@ -146,9 +201,13 @@ def run_dashboard():
                 results = client.search(params)
                 for dest in results.get("destinations", []):
                     name = dest.get("name", "Unknown Destination")
+                    if is_blacklisted(name, BLACKLIST):
+                        continue
+                    
                     price = dest.get("flight_price")
                     start_str = dest.get("start_date")
                     end_str = dest.get("end_date")
+                    country = dest.get("country", "")
                     if not price or not start_str or not end_str:
                         continue
                     start_date = datetime.strptime(start_str, "%Y-%m-%d")
@@ -156,14 +215,14 @@ def run_dashboard():
                     duration = (end_date - start_date).days
                     weekend_cnt = sum(1 for i in range(duration + 1) if (start_date + timedelta(days=i)).weekday() >= 4)
                     hols = trip_includes_holiday(start_str, end_str, USER_HOLIDAYS)
-                    is_intl = check_if_international(name)
+                    is_intl = check_if_international(name) or (country and country.lower() != "united states")
                     trip_sig = f"{origin}-{name}-{start_str}-{end_str}"
 
                     if 3 <= duration <= 7 and (weekend_cnt >= 1 or len(hols) > 0):
                         if not any(t["signature"] == trip_sig for t in explore_trips):
                             explore_trips.append({
                                 "signature": trip_sig, "origin": origin, "destination": name,
-                                "detailed_dest": get_enhanced_location(name),
+                                "detailed_dest": get_enhanced_location(name, country),
                                 "price": price, "start": start_str, "end": end_str,
                                 "duration": duration, "weekend_count": weekend_cnt,
                                 "holidays": hols, "is_international": is_intl,
@@ -172,7 +231,7 @@ def run_dashboard():
             except Exception as e:
                 print(f"Error scanning explore for {origin}: {e}")
 
-    # 1B. International Regional Sweeps (BOS & PVD)
+    # 1B. International Regional Sweeps
     for origin in ORIGIN_CODES:
         for region in INTL_REGIONS:
             for duration_type in ["1", "2"]:
@@ -187,9 +246,13 @@ def run_dashboard():
                     results = client.search(params)
                     for dest in results.get("destinations", []):
                         name = dest.get("name", "Unknown Destination")
+                        if is_blacklisted(name, BLACKLIST):
+                            continue
+                        
                         price = dest.get("flight_price")
                         start_str = dest.get("start_date")
                         end_str = dest.get("end_date")
+                        country = dest.get("country", "")
                         if not price or not start_str or not end_str:
                             continue
                         start_date = datetime.strptime(start_str, "%Y-%m-%d")
@@ -203,7 +266,7 @@ def run_dashboard():
                             if not any(t["signature"] == trip_sig for t in explore_trips):
                                 explore_trips.append({
                                     "signature": trip_sig, "origin": origin, "destination": name,
-                                    "detailed_dest": get_enhanced_location(name),
+                                    "detailed_dest": get_enhanced_location(name, country),
                                     "price": price, "start": start_str, "end": end_str,
                                     "duration": duration, "weekend_count": weekend_cnt,
                                     "holidays": hols, "is_international": True,
@@ -212,9 +275,12 @@ def run_dashboard():
                 except Exception as e:
                     print(f"Error sweeping {region['name']} for {origin}: {e}")
 
-    # 2. Target Wishlist Routes (Sweeps BOTH BOS and PVD automatically!)
+    # 2. Target Wishlist Routes
     for target in TARGET_DESTINATIONS:
         dest_key = target["destination"]
+        if is_blacklisted(dest_key, BLACKLIST):
+            continue
+
         if dest_key not in wishlist_grouped_trips:
             wishlist_grouped_trips[dest_key] = []
 
@@ -261,17 +327,14 @@ def run_dashboard():
                 except Exception as e:
                     print(f"Error checking {origin} -> {dest_key}: {e}")
 
-    # Sort wishlist options for each destination by price across both airports
     for dest in wishlist_grouped_trips:
         wishlist_grouped_trips[dest].sort(key=lambda x: x["price"])
 
-    # Categorize & Sort General Explore Lists
     dom_short = sorted([t for t in explore_trips if not t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     dom_long  = sorted([t for t in explore_trips if not t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
     intl_short = sorted([t for t in explore_trips if t["is_international"] and 3 <= t["duration"] <= 5], key=lambda x: x["price"])
     intl_long  = sorted([t for t in explore_trips if t["is_international"] and 6 <= t["duration"] <= 7], key=lambda x: x["price"])
 
-    # Generate HTML Output
     os.makedirs("public", exist_ok=True)
     now_str = datetime.now().strftime("%B %d, %Y at %I:%M %p EST")
 
@@ -302,7 +365,7 @@ def run_dashboard():
             html += f"""
             <div class='card'>
                 <div class='card-header'>
-                    <span class='route'>{t['origin']} <span class='arrow'>➡️</span> {t['detailed_dest']}</span>
+                    <span class='route'>{t['origin']} ➡️ {t['detailed_dest']}</span>
                     <span class='price'>${t['price']}</span>
                 </div>
                 <div class='card-details'>
@@ -315,7 +378,6 @@ def run_dashboard():
             """
         return html
 
-    # Render Individual Wishlist Sections
     wishlist_sections_html = ""
     if not wishlist_grouped_trips:
         wishlist_sections_html = "<p class='no-data'>No wishlist destinations added yet. Update your Google Sheet wishlist!</p>"
@@ -330,6 +392,11 @@ def run_dashboard():
             </div>
             """
 
+    # Build Coverage Footer Info
+    regions_str = ", ".join([r["name"] for r in INTL_REGIONS])
+    targets_str = ", ".join([t["destination"] for t in TARGET_DESTINATIONS]) if TARGET_DESTINATIONS else "None"
+    blacklist_str = ", ".join(BLACKLIST) if BLACKLIST else "None"
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -337,180 +404,26 @@ def run_dashboard():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Flight Intelligence Dashboard</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         <style>
-            :root {{
-                --bg-main: #0f172a;
-                --bg-card: #1e293b;
-                --bg-card-hover: #334155;
-                --border-color: #334155;
-                --text-main: #f8fafc;
-                --text-muted: #94a3b8;
-                --accent-blue: #38bdf8;
-                --glow-price: #38bdf8;
-            }}
-            
-            * {{
-                box-sizing: border-box;
-            }}
-
-            body {{
-                font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                background-color: var(--bg-main);
-                color: var(--text-main);
-                margin: 0;
-                padding: 24px 16px;
-                line-height: 1.5;
-            }}
-
-            .container {{
-                max-width: 920px;
-                margin: 0 auto;
-            }}
-
-            header {{
-                text-align: center;
-                margin-bottom: 32px;
-                padding: 10px 0;
-            }}
-
-            h1 {{
-                margin: 0;
-                color: var(--text-main);
-                font-size: 32px;
-                font-weight: 800;
-                letter-spacing: -0.025em;
-                background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-            }}
-
-            .last-updated {{
-                font-size: 13px;
-                color: var(--text-muted);
-                margin-top: 6px;
-                font-weight: 500;
-            }}
-
-            .section {{
-                background: var(--bg-card);
-                border: 1px solid var(--border-color);
-                border-radius: 16px;
-                padding: 24px;
-                margin-bottom: 24px;
-                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
-            }}
-
-            h2 {{
-                margin-top: 0;
-                font-size: 20px;
-                font-weight: 700;
-                border-bottom: 1px solid var(--border-color);
-                padding-bottom: 14px;
-                color: #e2e8f0;
-                letter-spacing: -0.01em;
-            }}
-
-            .card {{
-                border: 1px solid var(--border-color);
-                border-radius: 12px;
-                padding: 16px;
-                margin-bottom: 12px;
-                background: #0f172a;
-                transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-            }}
-
-            .card:hover {{
-                transform: translateY(-2px);
-                border-color: #475569;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-            }}
-
-            .card-header {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                font-weight: 700;
-                font-size: 16px;
-                flex-wrap: wrap;
-                gap: 12px;
-            }}
-
-            .route {{
-                color: #f1f5f9;
-            }}
-
-            .arrow {{
-                color: var(--accent-blue);
-                font-size: 14px;
-            }}
-
-            .price {{
-                color: var(--accent-blue);
-                font-size: 22px;
-                font-weight: 800;
-                text-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
-            }}
-
-            .card-details {{
-                margin-top: 12px;
-                font-size: 13.5px;
-                color: var(--text-muted);
-                display: flex;
-                gap: 12px;
-                flex-wrap: wrap;
-                align-items: center;
-            }}
-
-            .badge {{
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 12px;
-                font-weight: 700;
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }}
-
-            .badge.hol {{
-                background: rgba(245, 158, 11, 0.15);
-                color: #fbbf24;
-                border: 1px solid rgba(245, 158, 11, 0.3);
-            }}
-
-            .badge.price-low {{
-                background: rgba(16, 185, 129, 0.15);
-                color: #34d399;
-                border: 1px solid rgba(16, 185, 129, 0.3);
-            }}
-
-            .badge.price-typical {{
-                background: rgba(148, 163, 184, 0.15);
-                color: #cbd5e1;
-                border: 1px solid rgba(148, 163, 184, 0.3);
-            }}
-
-            .badge.price-high {{
-                background: rgba(239, 68, 68, 0.15);
-                color: #f87171;
-                border: 1px solid rgba(239, 68, 68, 0.3);
-            }}
-
-            .no-data {{
-                color: var(--text-muted);
-                font-style: italic;
-                margin: 8px 0 0 0;
-            }}
-
-            @media (max-width: 600px) {{
-                body {{ padding: 16px 8px; }}
-                .section {{ padding: 16px; border-radius: 12px; }}
-                h1 {{ font-size: 24px; }}
-                .card-header {{ flex-direction: column; align-items: flex-start; gap: 4px; }}
-                .price {{ font-size: 20px; }}
-            }}
+            body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }}
+            .container {{ max-width: 900px; margin: 0 auto; }}
+            header {{ text-align: center; margin-bottom: 25px; }}
+            h1 {{ margin: 0; color: #f8fafc; font-size: 28px; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+            .last-updated {{ font-size: 14px; color: #94a3b8; margin-top: 5px; }}
+            .section {{ background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 1px solid #334155; }}
+            h2 {{ margin-top: 0; font-size: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; color: #38bdf8; }}
+            .card {{ border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 10px; background: #0f172a; }}
+            .card-header {{ display: flex; justify-content: space-between; font-weight: bold; font-size: 16px; flex-wrap: wrap; gap: 8px; }}
+            .price {{ color: #38bdf8; font-size: 20px; text-shadow: 0 0 10px rgba(56,189,248,0.2); }}
+            .card-details {{ margin-top: 8px; font-size: 14px; color: #cbd5e1; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
+            .badge {{ border-radius: 4px; padding: 3px 8px; font-size: 12px; font-weight: bold; }}
+            .badge.hol {{ background: #78350f; color: #fef3c7; border: 1px solid #b45309; }}
+            .badge.price-low {{ background: #064e3b; color: #a7f3d0; border: 1px solid #059669; }}
+            .badge.price-typical {{ background: #334155; color: #e2e8f0; border: 1px solid #475569; }}
+            .badge.price-high {{ background: #7f1d1d; color: #fecaca; border: 1px solid #dc2626; }}
+            .no-data {{ color: #64748b; font-style: italic; }}
+            footer {{ margin-top: 30px; font-size: 13px; color: #94a3b8; border-top: 1px solid #334155; padding-top: 15px; line-height: 1.6; }}
+            footer h3 {{ margin: 0 0 8px 0; font-size: 14px; color: #cbd5e1; }}
         </style>
     </head>
     <body>
@@ -520,7 +433,6 @@ def run_dashboard():
                 <div class="last-updated">Updated Daily | Last Scan: {now_str}</div>
             </header>
 
-            <!-- Dynamic Wishlist Cards per Destination -->
             {wishlist_sections_html}
 
             <div class="section">
@@ -542,6 +454,14 @@ def run_dashboard():
                 <h2>🌍 General: International Week-Long Trips (6–7 Days)</h2>
                 {render_cards(intl_long, "Intl Long")}
             </div>
+
+            <footer>
+                <h3>🔍 Active Scan Coverage & Parameters</h3>
+                <div>• <strong>Origin Airports:</strong> {', '.join(ORIGIN_CODES)}</div>
+                <div>• <strong>International Regional Sweeps:</strong> {regions_str}</div>
+                <div>• <strong>Wishlist Targets:</strong> {targets_str}</div>
+                <div>• <strong>Excluded / Blacklisted Destinations:</strong> {blacklist_str}</div>
+            </footer>
         </div>
     </body>
     </html>
